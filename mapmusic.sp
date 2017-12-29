@@ -54,7 +54,13 @@ public int Native_SetVolume(Handle myself, int numParams)
         g_fVolume[client] = 0.0;
     }
     else
+    {
+        g_bDisabled[client] = false;
         g_fVolume[client] = volume * 0.01;
+    }
+
+    if(IsClientInGame(client))
+    PrintToChat(client, "[\x04MapMusic\x01]  \x05Volume\x01:  %d", volume);
 }
 
 public int Native_GetStatus(Handle myself, int numParams)
@@ -65,6 +71,8 @@ public int Native_GetStatus(Handle myself, int numParams)
 public int Native_SetStatus(Handle myself, int numParams)
 {
     g_bDisabled[GetNativeCell(1)] = GetNativeCell(2);
+    if(IsClientInGame(GetNativeCell(1)))
+    PrintToChat(GetNativeCell(1), "[\x04MapMusic\x01]  \x05BGM\x01:  %d", GetNativeCell(2) ? "Off" : "On");
 }
 
 public void OnPluginStart()
@@ -92,21 +100,23 @@ public void OnPluginStart()
 
     if(hAcceptInput == null)
     {
-        EngineVersion eVer = GetEngineVersion();
         char tmpOffset[148];
 
-        if(eVer == Engine_CSGO)
-            tmpOffset = "sdktools.games\\engine.csgo";
-        else if(eVer == Engine_CSS)
-            tmpOffset = "sdktools.games\\engine.css";
-        else if(eVer == Engine_TF2)
-            tmpOffset = "sdktools.games\\engine.tf";
-        else if(eVer == Engine_Contagion)
-            tmpOffset = "sdktools.games\\engine.contagion";
-        else if(eVer == Engine_Left4Dead2)
-            tmpOffset = "sdktools.games\\engine.Left4Dead2";
-        else if(eVer == Engine_AlienSwarm)
-            tmpOffset = "sdktools.games\\engine.swarm";
+        switch(GetEngineVersion())
+        {
+            case Engine_CSGO:
+                tmpOffset = "sdktools.games\\engine.csgo";
+            case Engine_CSS:
+                tmpOffset = "sdktools.games\\engine.css";
+            case Engine_TF2:
+                tmpOffset = "sdktools.games\\engine.tf";
+            case Engine_Contagion:
+                tmpOffset = "sdktools.games\\engine.contagion";
+            case Engine_Left4Dead2:
+                tmpOffset = "sdktools.games\\engine.Left4Dead2";
+            case Engine_AlienSwarm:
+                tmpOffset = "sdktools.games\\engine.swarm";
+        }
 
         Handle temp = LoadGameConfigFile(tmpOffset);
     
@@ -126,11 +136,26 @@ public void OnPluginStart()
         delete temp;
     }
     
+    RegConsoleCmd("sm_mapmusic", Command);
+    
     RegPluginLibrary("MapMusic");
 }
 
+public Action Command(int client, int args)
+{
+    PrintToChat(client, "[\x04MapMusic\x01]  \x05BGM\x01: %s  \x05Volume\x01: %d", g_bDisabled[client] ? "Off" : "On", RoundToCeil(g_fVolume[client]*100));
+    FakeClientCommand(client, "sm_music");
+    return Plugin_Handled;
+}
+
+public void OnClientConnected(int client)
+{
+    g_bDisabled[client] = false;
+    g_fVolume[client] = 1.0;
+}
+
 public void OnMapStart()
-{    
+{
     g_smSourceEnts.Clear();
     g_smChannel.Clear();
     g_smCommon.Clear();
@@ -415,7 +440,7 @@ void ClientSendSound(char[] name, int client, bool common = false)
         return;
 
     int customChannel;
-    
+
     if(!g_smChannel.GetValue(name, customChannel))
     {
         g_smChannel.SetValue(name, randomChannel, false);
