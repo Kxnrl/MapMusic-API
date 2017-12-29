@@ -125,6 +125,8 @@ public void OnPluginStart()
 
         delete temp;
     }
+    
+    RegPluginLibrary("MapMusic");
 }
 
 public void OnMapStart()
