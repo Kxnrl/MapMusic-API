@@ -80,7 +80,7 @@ public int Native_SetStatus(Handle myself, int numParams)
     g_bDisabled[client] = GetNativeCell(2);
     if(IsClientInGame(client))
     {
-        PrintToChat(GetNativeCell(1), "[\x04MapMusic\x01]  \x05BGM\x01:  %d", GetNativeCell(2) ? "Off" : "On");
+        PrintToChat(GetNativeCell(1), "[\x04MapMusic\x01]  \x05BGM\x01:  %s", GetNativeCell(2) ? "Off" : "On");
         if(g_bDisabled[client] || g_fVolume[client] <= 0.0)
             ClientStopSound(client, "", false);
     }
