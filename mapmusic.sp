@@ -48,19 +48,25 @@ public int Native_SetVolume(Handle myself, int numParams)
 {
     int client = GetNativeCell(1);
     int volume = GetNativeCell(2);
+    
+    g_fVolume[client] = volume * 0.01;
+
     if(volume <= 0)
     {
-        g_bDisabled[client] = true;
         g_fVolume[client] = 0.0;
     }
-    else
+    
+    if(volume > 100)
     {
-        g_bDisabled[client] = false;
-        g_fVolume[client] = volume * 0.01;
+        g_fVolume[client] = 1.0;
     }
 
     if(IsClientInGame(client))
-    PrintToChat(client, "[\x04MapMusic\x01]  \x05Volume\x01:  %d", volume);
+    {
+        PrintToChat(client, "[\x04MapMusic\x01]  \x05Volume\x01:  %d", RoundToCeil(g_fVolume[client]*100));
+        if(g_bDisabled[client] || g_fVolume[client] <= 0.0)
+            ClientStopSound(client, "", false);
+    }
 }
 
 public int Native_GetStatus(Handle myself, int numParams)
@@ -70,9 +76,14 @@ public int Native_GetStatus(Handle myself, int numParams)
 
 public int Native_SetStatus(Handle myself, int numParams)
 {
-    g_bDisabled[GetNativeCell(1)] = GetNativeCell(2);
-    if(IsClientInGame(GetNativeCell(1)))
-    PrintToChat(GetNativeCell(1), "[\x04MapMusic\x01]  \x05BGM\x01:  %d", GetNativeCell(2) ? "Off" : "On");
+    int client = GetNativeCell(1);
+    g_bDisabled[client] = GetNativeCell(2);
+    if(IsClientInGame(client))
+    {
+        PrintToChat(GetNativeCell(1), "[\x04MapMusic\x01]  \x05BGM\x01:  %d", GetNativeCell(2) ? "Off" : "On");
+        if(g_bDisabled[client] || g_fVolume[client] <= 0.0)
+            ClientStopSound(client, "", false);
+    }
 }
 
 public void OnPluginStart()
@@ -422,21 +433,21 @@ void SendSoundAll(char[] name, int entity, bool common = false)
         }
         
         for (int i = 1; i <= MaxClients; i++)
-            if(!g_bDisabled[i] && IsValidClient(i))
+            if(IsClientInGame(i) && !g_bDisabled[i] && g_fVolume[i] > 0.0)
                 EmitSoundToClient(i, FakePrecacheSound(name, common), i, customChannel, SNDLEVEL_NORMAL, SND_NOFLAGS, g_fVolume[i], SNDPITCH_NORMAL, -1, _, _, true);
     }
     else
     {
         int sourceEnt = GetSourceEntity(entity);            
         for (int i = 1; i <= MaxClients; i++)
-            if(!g_bDisabled[i] && IsValidClient(i))
+            if(IsClientInGame(i) && !g_bDisabled[i] && g_fVolume[i] > 0.0)
                 EmitSoundToClient(i, FakePrecacheSound(name, common), sourceEnt, SNDCHAN_USER_BASE, SNDLEVEL_NORMAL, SND_NOFLAGS, g_fVolume[i], SNDPITCH_NORMAL, -1, _, _, true);
     }
 }
 
 void ClientSendSound(char[] name, int client, bool common = false)
 {
-    if(!IsValidClient2(client))
+    if(!IsValidClient(client))
         return;
 
     int customChannel;
@@ -452,11 +463,11 @@ void ClientSendSound(char[] name, int client, bool common = false)
         }
     }
 
-    if(!g_bDisabled[client])
+    if(!g_bDisabled[client] && g_fVolume[client] > 0.0)
         EmitSoundToClient(client, FakePrecacheSound(name, common), client, customChannel, SNDLEVEL_NORMAL, SND_NOFLAGS, g_fVolume[client], SNDPITCH_NORMAL, -1, _, _, true);
 }
 
-void ClientStopSound(int client, char[] name = "", bool common = false)
+void ClientStopSound(int client, const char[] name = "", bool common = false)
 {
     if(name[0])
     {
@@ -473,7 +484,7 @@ void ClientStopSound(int client, char[] name = "", bool common = false)
     }
 }
 
-void StopSoundAll(char[] name, int entity, bool common = false)
+void StopSoundAll(const char[] name, int entity, bool common = false)
 {
     if(!IsValidEntity(entity))
         return;
@@ -482,7 +493,7 @@ void StopSoundAll(char[] name, int entity, bool common = false)
     if(eFlags & 1)
     {
         for(int i = 1; i <= MaxClients; i++)
-            if(!g_bDisabled[i] && IsValidClient(i))
+            if(IsClientInGame(i) && !g_bDisabled[i] && g_fVolume[i] > 0.0)
                 ClientStopSound(i, name, common);
     }
     else
@@ -517,10 +528,5 @@ stock static char[] FakePrecacheSound(const char[] sample, const bool common = f
 
 bool IsValidClient(int client)
 {
-    return IsClientInGame(client);
-}  
-
-bool IsValidClient2(int client)
-{
-    return (1 <= client <= MAXPLAYERS && IsClientInGame(client) && IsPlayerAlive(client));
+    return (1 <= client <= MAXPLAYERS && IsClientInGame(client));
 } 

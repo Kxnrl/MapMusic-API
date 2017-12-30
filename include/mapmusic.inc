@@ -1,3 +1,9 @@
+#if defined _MapMuisc_INCLUDED
+    #endinput
+#endif
+
+#define _MapMuisc_INCLUDED
+
 native int MapMusic_GetVolume(int client);
 native void MapMusic_SetVolume(int client, int volume); // 0 ~ 100;
 native bool MapMusic_GetStatus(int client); // true = Block map music;
