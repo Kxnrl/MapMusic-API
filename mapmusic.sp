@@ -135,7 +135,7 @@ public void OnPluginStart()
             SetFailState("Why you no has gamedata?");
 
         HookEvent("round_poststart", Event_PostRoundStart);
-        
+         
         int offset = GameConfGetOffset(temp, "AcceptInput");
         hAcceptInput = DHookCreate(offset, HookType_Entity, ReturnType_Bool, ThisPointer_CBaseEntity, AcceptInput);
         DHookAddParam(hAcceptInput, HookParamType_CharPtr);
@@ -528,5 +528,5 @@ stock static char[] FakePrecacheSound(const char[] sample, const bool common = f
 
 bool IsValidClient(int client)
 {
-    return (1 <= client <= MAXPLAYERS && IsClientInGame(client));
-} 
+    return (1 <= client <= MAXPLAYERS && IsClientInGame(client) && !IsClientSourceTV(client));
+}
