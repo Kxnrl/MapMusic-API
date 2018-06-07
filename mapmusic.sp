@@ -1,36 +1,54 @@
 #pragma semicolon 1
-
-#include <sdktools>
-#include <sdkhooks>
-#include <dhooks>
-#include <regex>
-
 #pragma newdecls required
-
-Handle hAcceptInput;
-Regex regPattern;
-RegexError regError;
-
-bool g_bDisabled[MAXPLAYERS+1] = false;
-float g_fVolume[MAXPLAYERS+1] = {1.0, ...};
-int randomChannel;
-StringMap g_smSourceEnts;
-StringMap g_smChannel;
-StringMap g_smCommon;
-StringMap g_smRecent;
-StringMap g_smVolume;
 
 public Plugin myinfo =
 {
     name        = "Map Music Controller",
-    author      = "Mitch & Agent Wesker & Kyle",
+    author      = "Mitch & Agent Wesker & Kyle \"Kxnrl\" Frankiss & SHUFEN & Yuna",
     description = "",
-    version     = "1.0",
-    url         = "https://ump45.moe"
+    version     = "2.0",
+    url         = "https://kxnrl.com"
 };
+
+/*                  GitHub                  */
+// https://github.com/AgentWesker/StopMusic
+// https://github.com/Xectali/MapMusic
+// https://github.com/bcserv/soundlib
+
+#include <sdkhooks>
+#include <dhooks>
+#include <regex>
+#include <clientprefs>
+#include <smutils>      //https://github.com/kxnrl/sourcemod-utils
+#include <soundlib>     //https://github.com/kxnrl/sm-ext-soundlib
+
+static StringMap g_smSourceEnt;
+static StringMap g_smCtChannel;
+static StringMap g_smSndCommon;
+static StringMap g_smRecentSnd;
+static StringMap g_smSndVolume;
+
+static int g_iChannel;
+static int g_iNumRound;
+static int g_iSTSound;
+
+static bool  g_bBGMply[MAXPLAYERS+1] = {false, ...};
+static float g_fBGMVol[MAXPLAYERS+1] = {1.0, ...};
+
+static Handle g_ckDisable = INVALID_HANDLE;
+static Handle g_ckBGMVole = INVALID_HANDLE;
+
+static ConVar g_cvar_mapmusic_min_length = null;
+
+static Handle hAcceptInput;
+static Regex regPattern;
+static RegexError regError;
+
 
 public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max)
 {
+    RegPluginLibrary("MapMusic");
+
     CreateNative("MapMusic_GetVolume", Native_GetVolume);
     CreateNative("MapMusic_SetVolume", Native_SetVolume);
     CreateNative("MapMusic_GetStatus", Native_GetStatus);
@@ -41,171 +59,320 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 
 public int Native_GetVolume(Handle myself, int numParams)
 {
-    return RoundToCeil(g_fVolume[GetNativeCell(1)] * 100);
+    return GetVolume(GetNativeCell(1));
 }
 
 public int Native_SetVolume(Handle myself, int numParams)
 {
-    int client = GetNativeCell(1);
-    int volume = GetNativeCell(2);
-    
-    g_fVolume[client] = volume * 0.01;
-
-    if(volume <= 0)
-    {
-        g_fVolume[client] = 0.0;
-    }
-    
-    if(volume > 100)
-    {
-        g_fVolume[client] = 1.0;
-    }
-
-    if(IsClientInGame(client))
-    {
-        PrintToChat(client, "[\x04MapMusic\x01]  \x05Volume\x01:  %d", RoundToCeil(g_fVolume[client]*100));
-        if(g_bDisabled[client] || g_fVolume[client] <= 0.0)
-            ClientStopSound(client, "", false);
-    }
+    SetVolume(GetNativeCell(1), GetNativeCell(2));
 }
 
 public int Native_GetStatus(Handle myself, int numParams)
 {
-    return g_bDisabled[GetNativeCell(1)];
+    return g_bBGMply[GetNativeCell(1)];
 }
 
 public int Native_SetStatus(Handle myself, int numParams)
 {
-    int client = GetNativeCell(1);
-    g_bDisabled[client] = GetNativeCell(2);
-    if(IsClientInGame(client))
-    {
-        PrintToChat(GetNativeCell(1), "[\x04MapMusic\x01]  \x05BGM\x01:  %s", GetNativeCell(2) ? "Off" : "On");
-        if(g_bDisabled[client] || g_fVolume[client] <= 0.0)
-            ClientStopSound(client, "", false);
-    }
+    SetStatus(GetNativeCell(1), GetNativeCell(2));
 }
 
 public void OnPluginStart()
 {
-    if(g_smSourceEnts == null)
-        g_smSourceEnts = new StringMap();
-
-    if(g_smChannel == null)
-        g_smChannel = new StringMap();
-
-    if(g_smCommon == null)
-        g_smCommon = new StringMap();
-
-    if(g_smRecent == null)
-        g_smRecent = new StringMap();
-
-    if(g_smVolume == null)
-        g_smVolume = new StringMap();
+    g_smSourceEnt = new StringMap();
+    g_smCtChannel = new StringMap();
+    g_smSndCommon = new StringMap();
+    g_smRecentSnd = new StringMap();
+    g_smSndVolume = new StringMap();
 
     char preError[256];
     char prePattern[256] = "(([-_a-zA-Z0-9]+[/]?)+[.][a-zA-Z0-9]{3})";
     regPattern = CompileRegex(prePattern, PCRE_CASELESS, preError, 256, regError);
     if(regError != REGEX_ERROR_NONE)
-        LogError(preError);
-
-    if(hAcceptInput == null)
+        SetFailState("Regex Error: [%d] %s", view_as<int>(regError), preError);
+    
+    char conf[128];
+    switch(GetEngineVersion())
     {
-        char tmpOffset[148];
-
-        switch(GetEngineVersion())
-        {
-            case Engine_CSGO:
-                tmpOffset = "sdktools.games\\engine.csgo";
-            case Engine_CSS:
-                tmpOffset = "sdktools.games\\engine.css";
-            case Engine_TF2:
-                tmpOffset = "sdktools.games\\engine.tf";
-            case Engine_Contagion:
-                tmpOffset = "sdktools.games\\engine.contagion";
-            case Engine_Left4Dead2:
-                tmpOffset = "sdktools.games\\engine.Left4Dead2";
-            case Engine_AlienSwarm:
-                tmpOffset = "sdktools.games\\engine.swarm";
-        }
-
-        Handle temp = LoadGameConfigFile(tmpOffset);
-    
-        if(temp == null)
-            SetFailState("Why you no has gamedata?");
-
-        HookEvent("round_poststart", Event_PostRoundStart);
-         
-        int offset = GameConfGetOffset(temp, "AcceptInput");
-        hAcceptInput = DHookCreate(offset, HookType_Entity, ReturnType_Bool, ThisPointer_CBaseEntity, AcceptInput);
-        DHookAddParam(hAcceptInput, HookParamType_CharPtr);
-        DHookAddParam(hAcceptInput, HookParamType_CBaseEntity);
-        DHookAddParam(hAcceptInput, HookParamType_CBaseEntity);
-        DHookAddParam(hAcceptInput, HookParamType_Object, 20);
-        DHookAddParam(hAcceptInput, HookParamType_Int);
-
-        delete temp;
+        case Engine_CSGO:       conf = "sdktools.games\\engine.csgo";
+        case Engine_CSS:        conf = "sdktools.games\\engine.css";
+        case Engine_TF2:        conf = "sdktools.games\\engine.tf";
+        case Engine_Left4Dead2: conf = "sdktools.games\\engine.Left4Dead2";
+        default: SetFailState("Game Engine ??");
     }
-    
-    RegConsoleCmd("sm_mapmusic", Command);
-    
-    RegPluginLibrary("MapMusic");
-}
 
-public Action Command(int client, int args)
-{
-    PrintToChat(client, "[\x04MapMusic\x01]  \x05BGM\x01: %s  \x05Volume\x01: %d", g_bDisabled[client] ? "Off" : "On", RoundToCeil(g_fVolume[client]*100));
-    FakeClientCommand(client, "sm_music");
-    return Plugin_Handled;
-}
+    Handle GameConf = LoadGameConfigFile(conf);
 
-public void OnClientConnected(int client)
-{
-    g_bDisabled[client] = false;
-    g_fVolume[client] = 1.0;
+    if(GameConf == null)
+        SetFailState("Why you no has gamedata?");
+
+    if(!HookEventEx("round_poststart", Event_PostRoundStart))
+        SetFailState("Failed to Hook Event \"round_poststart\".");
+
+    int offset = GameConfGetOffset(GameConf, "AcceptInput");
+    hAcceptInput = DHookCreate(offset, HookType_Entity, ReturnType_Bool, ThisPointer_CBaseEntity, AcceptInput);
+    if(hAcceptInput == null)
+        SetFailState("Failed to DHook \"AcceptInput\".");
+
+    DHookAddParam(hAcceptInput, HookParamType_CharPtr);
+    DHookAddParam(hAcceptInput, HookParamType_CBaseEntity);
+    DHookAddParam(hAcceptInput, HookParamType_CBaseEntity);
+    DHookAddParam(hAcceptInput, HookParamType_Object, 20);
+    DHookAddParam(hAcceptInput, HookParamType_Int);
+
+    delete GameConf;
+
+    RegConsoleCmd("sm_mapmusic",    Command_Music,      "Brings up the music menu");
+    RegConsoleCmd("sm_stopmusic",   Command_StopMusic,  "Toggles map music");
+    RegConsoleCmd("sm_startmusic",  Command_StartMusic, "Start map music");
+    RegConsoleCmd("sm_playmusic",   Command_StartMusic, "Start map music");
+
+    LoadTranslations("mapmusic.phrases");
+
+    g_cvar_mapmusic_min_length = CreateConVar("mapmusic_min_length", "10.0", "How long required length for it will be music files.", _, true, 0.0);
+
+    g_ckDisable = RegClientCookie("mapmusic_disable", "Disable Map Music", CookieAccess_Private);
+    g_ckBGMVole = RegClientCookie("mapmusic_volume",  "Map Music Volume",  CookieAccess_Private);
+
+    SetCookieMenuItem(PrefMenu, 0, "Map Music");
+
+    for(int i = 1; i <= MaxClients; i++)
+    {
+        OnClientConnected(i);
+        if(AreClientCookiesCached(i))
+            OnClientCookiesCached(i);
+    }
+
+    SMUtils_SetChatPrefix("[\x04Map\x0CMusic\x01]");
+    SMUtils_SetChatConSnd(true);
 }
 
 public void OnMapStart()
 {
-    g_smSourceEnts.Clear();
-    g_smChannel.Clear();
-    g_smCommon.Clear();
-    g_smRecent.Clear();
-    g_smVolume.Clear();
-    randomChannel = SNDCHAN_USER_BASE - 75;
+    g_smSourceEnt.Clear();
+    g_smCtChannel.Clear();
+    g_smSndCommon.Clear();
+    g_smRecentSnd.Clear();
+    g_smSndVolume.Clear();
+    
+    g_iChannel = SNDCHAN_USER_BASE - 75;
+
+    g_iNumRound = 0;
+    
+    g_iSTSound = FindStringTable("soundprecache");
+    if(g_iSTSound == INVALID_STRING_TABLE)
+        SetFailState("Failed to find string table \"soundprecache\".");
+}
+
+public void OnClientConnected(int client)
+{
+    g_bBGMply[client] = false;
+    g_fBGMVol[client] = 1.0;
+}
+
+public void OnClientDisconnect_Post(int client)
+{
+    g_bBGMply[client] = false;
+    g_fBGMVol[client] = 1.0;
+}
+
+public void OnClientCookiesCached(int client)
+{
+    char buffer[2][8];
+
+    GetClientCookie(client, g_ckDisable, buffer[0], 8);
+    GetClientCookie(client, g_ckBGMVole, buffer[1], 8);
+    g_bBGMply[client] = (buffer[0][0] == '\0') ? false : view_as<bool>(StringToInt(buffer[0]));
+    g_fBGMVol[client] = (buffer[1][0] == '\0') ? 1.0   : StringToFloat(buffer[1]);
 }
 
 public void Event_PostRoundStart(Event event, const char[] name, bool dontBroadcast)
 {
-    g_smRecent.Clear();
-    g_smVolume.Clear();
-    for(int j = 1; j <= MaxClients; j++)
-        if(IsValidClient(j))
+    g_smRecentSnd.Clear();
+    g_smSndVolume.Clear();
+
+    g_iNumRound++;
+
+    for(int client = 1; client <= MaxClients; client++)
+        if(ClientIsValid(client))
         {
-            ClientCommand(j, "snd_setsoundparam Music.StartRound.valve_csgo_01 volume 0");
-            ClientCommand(j, "snd_setsoundparam Music.StartRound_01.valve_csgo_01 volume 0");
-            ClientCommand(j, "snd_setsoundparam Music.StartRound_02.valve_csgo_01 volume 0");
-            ClientCommand(j, "snd_setsoundparam Music.StartRound_03.valve_csgo_01 volume 0");
-            ClientCommand(j, "snd_setsoundparam Music.StartAction.valve_csgo_01 volume 0");
-            ClientCommand(j, "snd_setsoundparam Music.StartAction_01.valve_csgo_01 volume 0"); 
-            ClientCommand(j, "snd_setsoundparam Music.DeathCam.valve_csgo_01 volume 0");
-            ClientCommand(j, "snd_setsoundparam Music.LostRound.valve_csgo_01 volume 0");
-            ClientCommand(j, "snd_setsoundparam Music.WonRound.valve_csgo_01 volume 0");
-            ClientCommand(j, "snd_setsoundparam Music.MVPAnthem.valve_csgo_01 volume 0");
-            ClientCommand(j, "snd_setsoundparam Music.MVPAnthem_01.valve_csgo_01 volume 0");
-            
-            ClientCommand(j, "snd_setsoundparam Music.StartRound.valve_csgo_02 volume 0");
-            ClientCommand(j, "snd_setsoundparam Music.StartRound_01.valve_csgo_02 volume 0");
-            ClientCommand(j, "snd_setsoundparam Music.StartRound_02.valve_csgo_02 volume 0");
-            ClientCommand(j, "snd_setsoundparam Music.StartRound_03.valve_csgo_02 volume 0");
-            ClientCommand(j, "snd_setsoundparam Music.StartAction.valve_csgo_02 volume 0");
-            ClientCommand(j, "snd_setsoundparam Music.StartAction_01.valve_csgo_02 volume 0"); 
-            ClientCommand(j, "snd_setsoundparam Music.DeathCam.valve_csgo_02 volume 0");
-            ClientCommand(j, "snd_setsoundparam Music.LostRound.valve_csgo_02 volume 0");
-            ClientCommand(j, "snd_setsoundparam Music.WonRound.valve_csgo_02 volume 0");
-            ClientCommand(j, "snd_setsoundparam Music.MVPAnthem.valve_csgo_02 volume 0");
-            ClientCommand(j, "snd_setsoundparam Music.MVPAnthem_01.valve_csgo_02 volume 0");
+            ClientCommand(client, "snd_setsoundparam Music.StartRound.valve_csgo_01     volume 0");
+            ClientCommand(client, "snd_setsoundparam Music.StartRound_01.valve_csgo_01  volume 0");
+            ClientCommand(client, "snd_setsoundparam Music.StartRound_02.valve_csgo_01  volume 0");
+            ClientCommand(client, "snd_setsoundparam Music.StartRound_03.valve_csgo_01  volume 0");
+            ClientCommand(client, "snd_setsoundparam Music.StartAction.valve_csgo_01    volume 0");
+            ClientCommand(client, "snd_setsoundparam Music.StartAction_01.valve_csgo_01 volume 0"); 
+            ClientCommand(client, "snd_setsoundparam Music.DeathCam.valve_csgo_01       volume 0");
+            ClientCommand(client, "snd_setsoundparam Music.LostRound.valve_csgo_01      volume 0");
+            ClientCommand(client, "snd_setsoundparam Music.WonRound.valve_csgo_01       volume 0");
+            ClientCommand(client, "snd_setsoundparam Music.MVPAnthem.valve_csgo_01      volume 0");
+            ClientCommand(client, "snd_setsoundparam Music.MVPAnthem_01.valve_csgo_01   volume 0");
+
+            ClientCommand(client, "snd_setsoundparam Music.StartRound.valve_csgo_02     volume 0");
+            ClientCommand(client, "snd_setsoundparam Music.StartRound_01.valve_csgo_02  volume 0");
+            ClientCommand(client, "snd_setsoundparam Music.StartRound_02.valve_csgo_02  volume 0");
+            ClientCommand(client, "snd_setsoundparam Music.StartRound_03.valve_csgo_02  volume 0");
+            ClientCommand(client, "snd_setsoundparam Music.StartAction.valve_csgo_02    volume 0");
+            ClientCommand(client, "snd_setsoundparam Music.StartAction_01.valve_csgo_02 volume 0"); 
+            ClientCommand(client, "snd_setsoundparam Music.DeathCam.valve_csgo_02       volume 0");
+            ClientCommand(client, "snd_setsoundparam Music.LostRound.valve_csgo_02      volume 0");
+            ClientCommand(client, "snd_setsoundparam Music.WonRound.valve_csgo_02       volume 0");
+            ClientCommand(client, "snd_setsoundparam Music.MVPAnthem.valve_csgo_02      volume 0");
+            ClientCommand(client, "snd_setsoundparam Music.MVPAnthem_01.valve_csgo_02   volume 0");
         }
+}
+
+public Action Command_Music(int client, int args)
+{
+    if(!ClientIsValid(client))
+        return Plugin_Handled;
+
+    DisplaySettingsMenu(client);
+
+    return Plugin_Handled;
+}
+
+public Action Command_StopMusic(int client, int args)
+{
+    if(!ClientIsValid(client))
+        return Plugin_Handled;
+
+    if(g_bBGMply[client]) {
+        SetStatus(client, false);
+        return Plugin_Handled;
+    }
+
+    SetStatus(client, true, true);
+
+    return Plugin_Handled;
+}
+
+public Action Command_StartMusic(int client, int args)
+{
+    if(!ClientIsValid(client))
+        return Plugin_Handled;
+
+    SetStatus(client, false);
+
+    return Plugin_Handled;
+}
+
+public void PrefMenu(int client, CookieMenuAction actions, any info, char[] buffer, int maxlen)
+{
+    if(actions == CookieMenuAction_DisplayOption)
+    {
+        FormatEx(buffer, maxlen, "%T", "Cookie_Menu", client);
+    }
+
+    if(actions == CookieMenuAction_SelectOption)
+    {
+        DisplaySettingsMenu(client);
+    }
+}
+
+static void DisplaySettingsMenu(int client)
+{
+    Menu prefmenu = CreateMenu(PrefMenuHandler, MENU_ACTIONS_DEFAULT);
+
+    char szMenuTitle[64];
+    FormatEx(szMenuTitle, 64, "%T", "Menu_Title", client);
+    prefmenu.SetTitle(szMenuTitle);
+
+    char szEnable[128];
+    FormatEx(szEnable, 128, "%T", "Menu_Music", client, g_bBGMply[client] ? "Disabled" : "Enabled", client);
+    prefmenu.AddItem(g_bBGMply[client] ? "enable" : "disable", szEnable);
+
+    char szItem[32];
+    int iVolume = GetVolume(client);
+    FormatEx(szItem, 32, "%T", "Menu_Vol", client, iVolume);
+    switch(iVolume)
+    {
+        case 100: prefmenu.AddItem("vol_80",  szItem);
+        case 80 : prefmenu.AddItem("vol_60",  szItem);
+        case 60 : prefmenu.AddItem("vol_40",  szItem);
+        case 40 : prefmenu.AddItem("vol_20",  szItem);
+        case 20 : prefmenu.AddItem("vol_100", szItem);
+        default : prefmenu.AddItem("vol_100", szItem);
+    }
+
+    prefmenu.ExitBackButton = true;
+
+    prefmenu.Display(client, 30);
+}
+
+public int PrefMenuHandler(Menu prefmenu, MenuAction actions, int client, int item)
+{
+    switch(actions)
+    {
+        case MenuAction_Select:
+        {
+            char preference[8];
+            GetMenuItem(prefmenu, item, preference, sizeof(preference));
+
+            if(StrEqual(preference, "disable"))
+                SetStatus(client, true);
+            else if(StrEqual(preference, "enable"))
+                SetStatus(client, false);
+
+            if(strncmp(preference, "vol_", 4) == 0)
+                SetVolume(client, StringToInt(preference[4]));
+
+            DisplaySettingsMenu(client);
+        }
+        case MenuAction_Cancel:
+        {
+            if(item == MenuCancel_ExitBack)
+                ShowCookieMenu(client);
+        }
+        case MenuAction_End: delete prefmenu;
+    }
+}
+
+static int GetVolume(int client)
+{
+    return RoundToCeil(g_fBGMVol[client] * 100);
+}
+
+static void SetVolume(int client, int volume)
+{
+    SetStatus(client, false, false);
+
+    g_fBGMVol[client] = volume * 0.01;
+
+    if(volume <= 0)
+        g_fBGMVol[client] = 0.0;
+
+    if(volume > 100)
+        g_fBGMVol[client] = 1.0;
+
+    char sValue[8];
+    FloatToString(g_fBGMVol[client], sValue, 8);
+    SetClientCookie(client, g_ckBGMVole, sValue);
+
+    if(ClientIsValid(client))
+    {
+        Chat(client, "\x01%T", "Text_MapMusicVolume", client, RoundToCeil(g_fBGMVol[client] * 100));
+        ClientUpdateSoundsVolume(client);
+        if(g_bBGMply[client] || g_fBGMVol[client] <= 0.0)
+            ClientStopSound(client, "", false);
+    }
+}
+
+static void SetStatus(int client, bool bBlockMapMusic, bool chat = true)
+{
+    g_bBGMply[client] = bBlockMapMusic;
+
+    char sValue[8];
+    IntToString(view_as<int>(g_bBGMply[client]), sValue, 8);
+    SetClientCookie(client, g_ckDisable, sValue);
+
+    if(ClientIsValid(client))
+    {
+        if(chat) Chat(client, "\x01%T", bBlockMapMusic ? "Text_MapMusicDisable" : "Text_MapMusicEnable", client);
+        if(!bBlockMapMusic) ClientUpdateSoundsVolume(client);
+        if(g_bBGMply[client] || g_fBGMVol[client] <= 0.0)
+            ClientStopSound(client, "", false);
+    }
 }
 
 public MRESReturn AcceptInput(int entity, Handle hReturn, Handle hParams)
@@ -214,20 +381,21 @@ public MRESReturn AcceptInput(int entity, Handle hReturn, Handle hParams)
     if(!IsValidEntity(entity))
         return MRES_Ignored;
 
-    char eClassname[128], eCommand[128], eParam[128], soundFile[256];
+    char eClassname[32], eCommand[128], eParam[128], soundFile[256];
     int eActivator;
 
     DHookGetParamString(hParams, 1, eCommand, 128);
 
-    int type, iParam = -1;
+    int type = -1;
+    float fParam = 0.0;
     type = DHookGetParamObjectPtrVar(hParams, 4, 16, ObjectValueType_Int);
 
-    if(type == 1)
-        iParam = RoundFloat(DHookGetParamObjectPtrVar(hParams, 4, 0, ObjectValueType_Float));
+    if(type == 1) 
+        fParam = DHookGetParamObjectPtrVar(hParams, 4, 0, ObjectValueType_Float);
     else if(type == 2)
     {
         DHookGetParamObjectPtrString(hParams, 4, 0, ObjectValueType_String, eParam, 128);
-        StringToIntEx(eParam, iParam);
+        StringToFloatEx(eParam, fParam);
     }
 
     if(!DHookIsNullParam(hParams, 2))
@@ -239,7 +407,7 @@ public MRESReturn AcceptInput(int entity, Handle hReturn, Handle hParams)
     else
         eActivator = -1;
 
-    GetEntityClassname(entity, eClassname, 128);
+    GetEntityClassname(entity, eClassname, 32);
 
     if(strcmp(eClassname, "point_clientcommand", false) == 0)
     {
@@ -251,7 +419,7 @@ public MRESReturn AcceptInput(int entity, Handle hReturn, Handle hParams)
             {
                 if(GetRegexSubString(regPattern, 0, soundFile, 256))
                 {
-                    AddToStringTable(FindStringTable("soundprecache"), FakePrecacheSound(soundFile, true));
+                    AddToStringTable(g_iSTSound, FakePrecacheSound(soundFile, true));
                     PrecacheSound(FakePrecacheSound(soundFile, true), false);
                     ClientSendSound(soundFile, eActivator, true);
                 }
@@ -261,33 +429,38 @@ public MRESReturn AcceptInput(int entity, Handle hReturn, Handle hParams)
         }
         return MRES_Ignored;
     }
-    
+
     GetEntPropString(entity, Prop_Data, "m_iszSound", soundFile, 256);
+
+    float fLength = GetSoundLengthFloat(soundFile);
+    if(fLength && fLength < g_cvar_mapmusic_min_length.FloatValue)
+        return MRES_Ignored;
+
     int eFlags = GetEntProp(entity, Prop_Data, "m_spawnflags");
 
-    if(StrEqual(eCommand, "PlaySound", false) || StrEqual(eCommand, "FadeIn", false) || (StrEqual(eCommand, "Volume", false) && (iParam > 0)) || StrEqual(eCommand, "ToggleSound", false))
+    if(strcmp(eCommand, "PlaySound", false) == 0 || strcmp(eCommand, "FadeIn", false) == 0 || (strcmp(eCommand, "Volume", false) == 0 && (fParam >= 0.1)) || strcmp(eCommand, "ToggleSound", false) == 0)
     {
         int temp;
-        bool common = g_smCommon.GetValue(soundFile, temp);
+        bool common = g_smSndCommon.GetValue(soundFile, temp);
 
-        if(!((StrContains(soundFile, ".mp3", false) != -1) || (StrContains(soundFile, ".wav", false) != -1))) {
-            //Workaround for client soundscripts (?)
-            return MRES_Ignored;
-        }
-        
+        if(!((StrContains(soundFile, ".mp3", false) != -1) || (StrContains(soundFile, ".wav", false) != -1)))
+            return MRES_Ignored; //Workaround for client soundscripts (?)
+
         if(eFlags & 1)
         {
-            int curVol;
-            if(g_smVolume.GetValue(soundFile, curVol) && (StrEqual(eCommand, "Volume", false) || StrEqual(eCommand, "ToggleSound", false)))
+            float curVol;
+            if(g_smSndVolume.GetValue(soundFile, curVol) && (StrEqual(eCommand, "Volume", false) || StrEqual(eCommand, "ToggleSound", false)))
             {
-                if((curVol != iParam) && StrEqual(eCommand, "Volume", false))
+                if((curVol != fParam || (curVol >= 0.1 && fParam >= 0.1)) && strcmp(eCommand, "Volume", false) == 0)
                 {
                     //Different volume but already playing? Ignore
                     DHookSetReturn(hReturn, false);
                     return MRES_Supercede;
-                } else if(StrEqual(eCommand, "ToggleSound", false)) {
+                }
+                else if(strcmp(eCommand, "ToggleSound", false) == 0)
+                {
                     //Sound was played already, so toggle the sound off
-                    g_smVolume.Remove(soundFile);
+                    g_smSndVolume.Remove(soundFile);
                     StopSoundAll(soundFile, entity, common);
                     DHookSetReturn(hReturn, false);
                     return MRES_Supercede;
@@ -295,32 +468,32 @@ public MRESReturn AcceptInput(int entity, Handle hReturn, Handle hParams)
             }
             else
             {
-                if(StrEqual(eCommand, "PlaySound", false) || StrEqual(eCommand, "ToggleSound", false))
-                    g_smVolume.SetValue(soundFile, 10, true);
+                if(strcmp(eCommand, "PlaySound", false) == 0 || strcmp(eCommand, "ToggleSound", false) == 0)
+                    g_smSndVolume.SetValue(soundFile, 10.0, true);
                 else if(StrEqual(eCommand, "Volume", false))
-                    g_smVolume.SetValue(soundFile, iParam, true);
+                    g_smSndVolume.SetValue(soundFile, fParam, true);
             }
         }
 
-        if(g_smRecent.GetValue(soundFile, temp))
+        if(g_smRecentSnd.GetValue(soundFile, temp))
         {
-            g_smRecent.Remove(soundFile);
-            g_smCommon.SetValue(soundFile, 1, true);
+            g_smRecentSnd.Remove(soundFile);
+            g_smSndCommon.SetValue(soundFile, 1, true);
             common = true;
-            AddToStringTable(FindStringTable("soundprecache"), FakePrecacheSound(soundFile, true));
+            AddToStringTable(g_iSTSound, FakePrecacheSound(soundFile, true));
             PrecacheSound(FakePrecacheSound(soundFile, true), false);
         }
         else
         {
-            AddToStringTable(FindStringTable("soundprecache"), FakePrecacheSound(soundFile, common));
+            AddToStringTable(g_iSTSound, FakePrecacheSound(soundFile, common));
             PrecacheSound(FakePrecacheSound(soundFile, common), false);
         }
 
-        SendSoundAll(soundFile, entity, common);
+        SendSound(soundFile, entity, common, fLength);
 
         if(!common && !(eFlags & 1))
         {
-            g_smRecent.SetValue(soundFile, 1, true);
+            g_smRecentSnd.SetValue(soundFile, 1, true);
             DataPack dataPack;
             CreateDataTimer(0.6, CheckCommonSounds, dataPack);
             dataPack.WriteString(soundFile);
@@ -328,38 +501,63 @@ public MRESReturn AcceptInput(int entity, Handle hReturn, Handle hParams)
         }
         DHookSetReturn(hReturn, false);
         return MRES_Supercede;
-    } 
-    else if(StrEqual(eCommand, "StopSound", false) || StrEqual(eCommand, "FadeOut", false) || (StrEqual(eCommand, "Volume", false) && (iParam == 0)))
+    }
+    else if(strcmp(eCommand, "StopSound", false) == 0 || strcmp(eCommand, "FadeOut", false) == 0 || (strcmp(eCommand, "Volume", false) == 0 && (fParam < 0.1)))
     {
         int temp;
-        bool common = g_smCommon.GetValue(soundFile, temp);    
+        bool common = g_smSndCommon.GetValue(soundFile, temp);
         StopSoundAll(soundFile, entity, common);
-        
+
         if(eFlags & 1)
-        {
-            g_smVolume.Remove(soundFile);
-        }
-        
+            g_smSndVolume.Remove(soundFile);
+
         return MRES_Ignored;
     }
-    
+
     return MRES_Ignored;
+}
+
+static float GetSoundLengthFloat(const char[] file)
+{
+    char path[256];
+    
+    // in sound folder
+    if(file[0] == '*' || file[0] == '#' || file[0] == '~')
+        FormatEx(path, 256, "sound/%s", file[1]);
+    else
+        FormatEx(path, 256, "%s", file);
+
+    Handle sound = OpenSoundFile(path, true);
+
+    if(sound == null)
+        ReplaceString(path, 256, "sound/", "", false);
+
+    sound = OpenSoundFile(path, true);
+    if(sound == null)
+    {
+        ChatAll("Failed to open sound [%s]", file);
+        return 0.0;
+    }
+
+    float result = GetSoundLength(sound);
+
+    delete sound;
+
+    return result;
 }
 
 public int GetSourceEntity(int entity)
 {
     char seName[64];
-    GetEntPropString(entity, Prop_Data, "m_sSourceEntName", seName, sizeof(seName));
+    GetEntPropString(entity, Prop_Data, "m_sSourceEntName", seName, 64);
     if(seName[0])
     {
         int entRef;
-        if(g_smSourceEnts.GetValue(seName, entRef))
+        if(g_smSourceEnt.GetValue(seName, entRef))
         {
             int sourceEnt = EntRefToEntIndex(entRef);
             if(IsValidEntity(sourceEnt))
-            {
                 return sourceEnt;
-            }
         }
     }
     return entity;
@@ -370,26 +568,27 @@ public Action CheckCommonSounds(Handle timer, DataPack dataPack)
     dataPack.Reset();
     char soundFile[256];
     dataPack.ReadString(soundFile, 256);
-    g_smRecent.Remove(soundFile);
+    g_smRecentSnd.Remove(soundFile);
     int temp;
-    if(g_smCommon.GetValue(soundFile, temp))
+    if(g_smSndCommon.GetValue(soundFile, temp))
     {
-        temp = dataPack.ReadCell();            
+        temp = dataPack.ReadCell();
         StopSoundAll(soundFile, temp, false);
     }
+    return Plugin_Stop;
 }
 
 public void OnEntityCreated(int entity, const char[] classname)
 {
     if(!IsValidEdict(entity))
         return;
-    
-    if(StrEqual(classname, "ambient_generic", false))
+
+    if(classname[0] == 'a' && strcmp(classname, "ambient_generic") == 0)
     {
         DHookEntity(hAcceptInput, false, entity);
         SDKHook(entity, SDKHook_SpawnPost, OnEntitySpawned);
     }
-    else if(StrEqual(classname, "point_clientcommand", false))
+    else if(classname[0] == 'p' && strcmp(classname, "point_clientcommand") == 0)
         DHookEntity(hAcceptInput, false, entity);
 }
 
@@ -399,20 +598,23 @@ public void OnEntitySpawned(int entity)
     GetEntPropString(entity, Prop_Data, "m_sSourceEntName", seName, 64);
     int eFlags = GetEntProp(entity, Prop_Data, "m_spawnflags");
     
+   
     if(!(eFlags & 1) && seName[0])
-        for (int i = 0; i <= GetEntityCount(); i++)
+    {
+        int count = GetEntityCount();
+        for(int i = 0; i <= count; i++)
             if(IsValidEntity(i))
             {
                 GetEntPropString(i, Prop_Data, "m_iName", eName, 64);
-                if(StrEqual(seName, eName, false))
-                {
-                    g_smSourceEnts.SetValue(seName, EntIndexToEntRef(i), true);
+                if (StrEqual(seName, eName, false)) {
+                    g_smSourceEnt.SetValue(seName, EntIndexToEntRef(i), true);
                     return;
                 }
             }
+    }
 }
 
-void SendSoundAll(char[] name, int entity, bool common = false)
+static void SendSound(char[] name, int entity, bool common = false, float length, bool updatevol = false, int client = -1)
 {
     if(!IsValidEntity(entity))
         return;
@@ -422,60 +624,84 @@ void SendSoundAll(char[] name, int entity, bool common = false)
     if(eFlags & 1)
     {
         int customChannel;
-        
-        if(!g_smChannel.GetValue(name, customChannel))
+
+        if(!g_smCtChannel.GetValue(name, customChannel))
         {
-            g_smChannel.SetValue(name, randomChannel, false);
-            customChannel = randomChannel;
-            randomChannel++;
-            if(randomChannel > SNDCHAN_USER_BASE)
-                randomChannel = SNDCHAN_USER_BASE - 75;
+            g_smCtChannel.SetValue(name, g_iChannel, false);
+            customChannel = g_iChannel;
+            g_iChannel++;
+            if(g_iChannel > SNDCHAN_USER_BASE)
+                g_iChannel = SNDCHAN_USER_BASE - 75;
         }
-        
-        for (int i = 1; i <= MaxClients; i++)
-            if(IsClientInGame(i) && !g_bDisabled[i] && g_fVolume[i] > 0.0)
-                EmitSoundToClient(i, FakePrecacheSound(name, common), i, customChannel, SNDLEVEL_NORMAL, SND_NOFLAGS, g_fVolume[i], SNDPITCH_NORMAL, -1, _, _, true);
+
+        if(updatevol && IsClientInGame(client) && !g_bBGMply[client] && GetVolume(client) > 0)
+        {
+            EmitSoundToClient(client, FakePrecacheSound(name, common), client, customChannel, SNDLEVEL_NORMAL, SND_CHANGEVOL, g_fBGMVol[client], SNDPITCH_NORMAL, -1, _, _, true);
+            return;
+        }
+
+        for(int i = 1; i <= MaxClients; i++)
+            if(IsClientInGame(i) && !g_bBGMply[i] && GetVolume(i) > 0)
+                EmitSoundToClient(i, FakePrecacheSound(name, common), i, customChannel, SNDLEVEL_NORMAL, SND_NOFLAGS, g_fBGMVol[i], SNDPITCH_NORMAL, -1, _, _, true);
     }
     else
     {
-        int sourceEnt = GetSourceEntity(entity);            
-        for (int i = 1; i <= MaxClients; i++)
-            if(IsClientInGame(i) && !g_bDisabled[i] && g_fVolume[i] > 0.0)
-                EmitSoundToClient(i, FakePrecacheSound(name, common), sourceEnt, SNDCHAN_USER_BASE, SNDLEVEL_NORMAL, SND_NOFLAGS, g_fVolume[i], SNDPITCH_NORMAL, -1, _, _, true);
+        int sourceEnt = GetSourceEntity(entity);
+
+        if(updatevol && IsClientInGame(client) && !g_bBGMply[client] && GetVolume(client) > 0)
+        {
+            EmitSoundToClient(client, FakePrecacheSound(name, common), sourceEnt, SNDCHAN_USER_BASE, SNDLEVEL_NORMAL, SND_CHANGEVOL, g_fBGMVol[client], SNDPITCH_NORMAL, -1, _, _, true);
+            return;
+        }
+
+        for(int i = 1; i <= MaxClients; i++)
+            if(IsClientInGame(i) && !g_bBGMply[i] && GetVolume(i) > 0)
+                EmitSoundToClient(i, FakePrecacheSound(name, common), sourceEnt, SNDCHAN_USER_BASE, SNDLEVEL_NORMAL, SND_NOFLAGS, g_fBGMVol[i], SNDPITCH_NORMAL, -1, _, _, true);
     }
+
+    DataPack pack = new DataPack();
+    CreateDataTimer(length, Timer_OnSoundEnd, pack, TIMER_FLAG_NO_MAPCHANGE);
+    pack.WriteString(name);
+    pack.WriteCell(g_iNumRound);
 }
 
-void ClientSendSound(char[] name, int client, bool common = false)
+public Action Timer_OnSoundEnd(Handle timer, DataPack pack)
 {
-    if(!IsValidClient(client))
+    pack.Reset();
+    char soundFile[256];
+    pack.ReadString(soundFile, 256);
+    int iTimerRoundNum = pack.ReadCell();
+
+    if(iTimerRoundNum == g_iNumRound)
+        g_smSndVolume.Remove(soundFile);
+}
+
+static void ClientSendSound(char[] name, int client, bool common = false)
+{
+    if(!ClientIsValid(client))
         return;
 
     int customChannel;
 
-    if(!g_smChannel.GetValue(name, customChannel))
+    if(!g_smCtChannel.GetValue(name, customChannel))
     {
-        g_smChannel.SetValue(name, randomChannel, false);
-        customChannel = randomChannel;
-        randomChannel++;
-        if(randomChannel > SNDCHAN_USER_BASE)
-        {
-            randomChannel = SNDCHAN_USER_BASE - 75;
-        }
+        g_smCtChannel.SetValue(name, g_iChannel, false);
+        customChannel = g_iChannel;
+        g_iChannel++;
+        if(g_iChannel > SNDCHAN_USER_BASE)
+            g_iChannel = SNDCHAN_USER_BASE - 75;
     }
 
-    if(!g_bDisabled[client] && g_fVolume[client] > 0.0)
-        EmitSoundToClient(client, FakePrecacheSound(name, common), client, customChannel, SNDLEVEL_NORMAL, SND_NOFLAGS, g_fVolume[client], SNDPITCH_NORMAL, -1, _, _, true);
+    if(!g_bBGMply[client] && GetVolume(client) > 0)
+        EmitSoundToClient(client, FakePrecacheSound(name, common), client, customChannel, SNDLEVEL_NORMAL, SND_NOFLAGS, g_fBGMVol[client], SNDPITCH_NORMAL, -1, _, _, true);
 }
 
-void ClientStopSound(int client, const char[] name = "", bool common = false)
+static void ClientStopSound(int client, const char[] name = "", bool common = false)
 {
     if(name[0])
     {
         int customChannel;
-        if(g_smChannel.GetValue(name, customChannel))
-            StopSound(client, customChannel, FakePrecacheSound(name, common));
-        else
-            StopSound(client, SNDCHAN_USER_BASE, FakePrecacheSound(name, common));
+        StopSound(client, (g_smCtChannel.GetValue(name, customChannel)) ? customChannel : SNDCHAN_USER_BASE, FakePrecacheSound(name, common));
     }
     else
     {
@@ -484,7 +710,7 @@ void ClientStopSound(int client, const char[] name = "", bool common = false)
     }
 }
 
-void StopSoundAll(const char[] name, int entity, bool common = false)
+static void StopSoundAll(const char[] name, int entity, bool common = false)
 {
     if(!IsValidEntity(entity))
         return;
@@ -493,7 +719,7 @@ void StopSoundAll(const char[] name, int entity, bool common = false)
     if(eFlags & 1)
     {
         for(int i = 1; i <= MaxClients; i++)
-            if(IsClientInGame(i) && !g_bDisabled[i] && g_fVolume[i] > 0.0)
+            if(IsClientInGame(i) && !g_bBGMply[i] && GetVolume(i) > 0)
                 ClientStopSound(i, name, common);
     }
     else
@@ -503,7 +729,32 @@ void StopSoundAll(const char[] name, int entity, bool common = false)
     }
 }
 
-stock static char[] FakePrecacheSound(const char[] sample, const bool common = false)
+static void ClientUpdateSoundsVolume(int client)
+{
+    int entity = INVALID_ENT_REFERENCE;
+    while((entity = FindEntityByClassname(entity, "ambient_generic")) != INVALID_ENT_REFERENCE)
+    {
+        if(GetHammerIdOfEntity(entity) <= 0)
+            continue;
+
+        char soundFile[256];
+        GetEntPropString(entity, Prop_Data, "m_iszSound", soundFile, 256);
+
+        float fVol = 0.0;
+        if(!g_smSndVolume.GetValue(soundFile, fVol))
+            continue;
+
+        if(fVol < 0.1)
+            continue;
+
+        int temp;
+        bool common = g_smSndCommon.GetValue(soundFile, temp);
+
+        SendSound(soundFile, entity, common, 0.0, true, client);
+    }
+}
+
+static char[] FakePrecacheSound(const char[] sample, const bool common = false)
 {
     char szSound[256];
     strcopy(szSound, 256, sample);
@@ -516,17 +767,16 @@ stock static char[] FakePrecacheSound(const char[] sample, const bool common = f
             else
                 Format(szSound, 256, "*%s", szSound);
         }
-    } else 
+    }
+    else
     {
-        if(szSound[0] == '*')
-            Format(szSound, 256, "%s", szSound[1]);
-        if(szSound[0] == '#')
+        if(szSound[0] == '*' || szSound[0] == '#')
             Format(szSound, 256, "%s", szSound[1]);
     }
     return szSound;
 }
 
-bool IsValidClient(int client)
+static int GetHammerIdOfEntity(int entity)
 {
-    return (1 <= client <= MAXPLAYERS && IsClientInGame(client) && !IsClientSourceTV(client));
+    return IsValidEntity(entity) ? GetEntProp(entity, Prop_Data, "m_iHammerID") : -1;
 }

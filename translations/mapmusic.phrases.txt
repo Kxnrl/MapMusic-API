@@ -1,0 +1,87 @@
+"Phrases"
+{
+	"Cookie_Menu"
+	{
+		"en"	"Map Music"
+		"jp"	"Map Music (マップBGM)"
+		"ko"	"맵 음악 설정"
+		"chi"	"Map Music - 地图音乐"
+	}
+
+	"Text_MapMusicEnable"
+	{
+		"en"	"Map music is {lightgreen}Enabled{default}."
+		"jp"	"マップのBGMを {lightgreen}有効{default} にしました."
+		"ko"	"맵 음악이 {lightgreen}켜집니다{default}."
+		"chi"	"地图背景音乐{lightgreen}已开启{default}."
+	}
+
+	"Text_MapMusicDisable"
+	{
+		"en"	"Map music is {lightgreen}Disabled{default}."
+		"jp"	"マップのBGMを {lightgreen}無効{default} にしました."
+		"ko"	"맵 음악이 {lightgreen}꺼집니다{default}."
+		"chi"	"地图背景音乐{red}已关闭{default}."
+	}
+
+	"Text_MapMusicVolume"
+	{
+		"#format"	"{1:d}"
+
+		"en"	"Map music is {lightgreen}Enabled{default}. Volume: {lightgreen}{1}"
+		"jp"	"マップのBGMが {lightgreen}有効{default} です. 音量: {lightgreen}{1}"
+		"ko"	"맵 음악이 {lightgreen}켜집니다{default}. 볼륨: {lightgreen}{1}"
+		"chi"	"地图背景音乐{lightgreen}已开启{default}. 音量: {lightgreen}{1}"
+	}
+
+	"Enabled"
+	{
+		"en"	"Enabled"
+		"jp"	"有効"
+		"ko"	"켜집니다"
+		"chi"	"开启"
+	}
+
+	"Disabled"
+	{
+		"en"	"Disabled"
+		"jp"	"無効"
+		"ko"	"꺼집니다"
+		"chi"	"关闭"
+	}
+
+	"Menu_Title"
+	{
+		"en"	"[MapMusic] Sound Control Menu"
+		"jp"	"[マップBGM] サウンドコントロールメニュー"
+		"ko"	"[맵음악] 사운드 조정 메뉴"
+		"chi"	"[MapMusic] 音乐控制菜单"
+	}
+
+	"Menu_AdjustDesc"
+	{
+		"en"	"You can use volume control instead of fully stopping\nFor adjust volume is \"!mapmusic <0-100>\""
+		"jp"	"完全に無効にする代わりに音量の調節もできます\n\"!mapmusic <0-100>\" を入力"
+		"ko"	"음악을 완전 멈추는 대신 볼륨을 조절할 수 있습니다\n채팅창에 \"!mapmusic <0-100>\"으로 조절이 가능합니다"
+		"chi"	"你可以调整音乐的音量来避免直接关闭音乐\n操作如下 \"!mapmusic <0-100>\""
+	}
+
+	"Menu_Music"
+	{
+		"#format"	"{1:T}"
+
+		"en"	"Music: {1}"
+		"jp"	"マップBGM: {1}"
+		"ko"	"음악: {1}"
+		"chi"	"音乐: {1}"
+	}
+
+	"Menu_Vol"
+	{
+		"#format"	"{1:d}"
+
+		"en"	"Volume: {1}"
+		"ko"	"볼륨: {1}"
+		"chi"	"音量: {1}"
+	}
+}
