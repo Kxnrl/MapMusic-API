@@ -6,7 +6,7 @@ public Plugin myinfo =
     name        = "Map Music Controller",
     author      = "Mitch & Agent Wesker & Kyle \"Kxnrl\" Frankiss & SHUFEN & Yuna",
     description = "",
-    version     = "2.0",
+    version     = "2.2",
     url         = "https://kxnrl.com"
 };
 
@@ -27,6 +27,7 @@ static StringMap g_smCtChannel;
 static StringMap g_smSndCommon;
 static StringMap g_smRecentSnd;
 static StringMap g_smSndVolume;
+static StringMap g_smSndLength;
 
 static int g_iChannel;
 static int g_iNumRound;
@@ -84,6 +85,7 @@ public void OnPluginStart()
     g_smSndCommon = new StringMap();
     g_smRecentSnd = new StringMap();
     g_smSndVolume = new StringMap();
+    g_smSndLength = new StringMap();
 
     char preError[256];
     char prePattern[256] = "(([-_a-zA-Z0-9]+[/]?)+[.][a-zA-Z0-9]{3})";
@@ -143,8 +145,9 @@ public void OnPluginStart()
             OnClientCookiesCached(i);
     }
 
-    SMUtils_SetChatPrefix("[\x04Map\x0CMusic\x01]");
-    SMUtils_SetChatConSnd(true);
+    SMUtils_SetChatPrefix("[\x04MapMusic\x01]");
+    SMUtils_SetChatSpaces("     ");
+    SMUtils_SetChatConSnd(false);
 }
 
 public void OnMapStart()
@@ -154,11 +157,12 @@ public void OnMapStart()
     g_smSndCommon.Clear();
     g_smRecentSnd.Clear();
     g_smSndVolume.Clear();
-    
+    g_smSndLength.Clear();
+
     g_iChannel = SNDCHAN_USER_BASE - 75;
 
     g_iNumRound = 0;
-    
+
     g_iSTSound = FindStringTable("soundprecache");
     if(g_iSTSound == INVALID_STRING_TABLE)
         SetFailState("Failed to find string table \"soundprecache\".");
@@ -237,7 +241,8 @@ public Action Command_StopMusic(int client, int args)
     if(!ClientIsValid(client))
         return Plugin_Handled;
 
-    if(g_bBGMply[client]) {
+    if(g_bBGMply[client])
+    {
         SetStatus(client, false);
         return Plugin_Handled;
     }
@@ -273,10 +278,7 @@ public void PrefMenu(int client, CookieMenuAction actions, any info, char[] buff
 static void DisplaySettingsMenu(int client)
 {
     Menu prefmenu = CreateMenu(PrefMenuHandler, MENU_ACTIONS_DEFAULT);
-
-    char szMenuTitle[64];
-    FormatEx(szMenuTitle, 64, "%T", "Menu_Title", client);
-    prefmenu.SetTitle(szMenuTitle);
+    prefmenu.SetTitle("%T\n ", "Menu_Title", client);
 
     char szEnable[128];
     FormatEx(szEnable, 128, "%T", "Menu_Music", client, g_bBGMply[client] ? "Disabled" : "Enabled", client);
@@ -287,16 +289,19 @@ static void DisplaySettingsMenu(int client)
     FormatEx(szItem, 32, "%T", "Menu_Vol", client, iVolume);
     switch(iVolume)
     {
-        case 100: prefmenu.AddItem("vol_80",  szItem);
-        case 80 : prefmenu.AddItem("vol_60",  szItem);
-        case 60 : prefmenu.AddItem("vol_40",  szItem);
-        case 40 : prefmenu.AddItem("vol_20",  szItem);
-        case 20 : prefmenu.AddItem("vol_100", szItem);
+        case 100: prefmenu.AddItem("vol_90",  szItem);
+        case 90 : prefmenu.AddItem("vol_80",  szItem);
+        case 80 : prefmenu.AddItem("vol_70",  szItem);
+        case 70 : prefmenu.AddItem("vol_60",  szItem);
+        case 60 : prefmenu.AddItem("vol_50",  szItem);
+        case 50 : prefmenu.AddItem("vol_40",  szItem);
+        case 40 : prefmenu.AddItem("vol_30",  szItem);
+        case 30 : prefmenu.AddItem("vol_20",  szItem);
+        case 20 : prefmenu.AddItem("vol_10",  szItem);
         default : prefmenu.AddItem("vol_100", szItem);
     }
 
-    prefmenu.ExitBackButton = true;
-
+    //prefmenu.ExitBackButton = true;
     prefmenu.Display(client, 30);
 }
 
@@ -309,9 +314,9 @@ public int PrefMenuHandler(Menu prefmenu, MenuAction actions, int client, int it
             char preference[8];
             GetMenuItem(prefmenu, item, preference, sizeof(preference));
 
-            if(StrEqual(preference, "disable"))
+            if(strcmp(preference, "disable") == 0)
                 SetStatus(client, true);
-            else if(StrEqual(preference, "enable"))
+            else if(strcmp(preference, "enable") == 0)
                 SetStatus(client, false);
 
             if(strncmp(preference, "vol_", 4) == 0)
@@ -449,7 +454,7 @@ public MRESReturn AcceptInput(int entity, Handle hReturn, Handle hParams)
         if(eFlags & 1)
         {
             float curVol;
-            if(g_smSndVolume.GetValue(soundFile, curVol) && (StrEqual(eCommand, "Volume", false) || StrEqual(eCommand, "ToggleSound", false)))
+            if(g_smSndVolume.GetValue(soundFile, curVol) && (strcmp(eCommand, "Volume", false) == 0 || strcmp(eCommand, "ToggleSound", false) == 0))
             {
                 if((curVol != fParam || (curVol >= 0.1 && fParam >= 0.1)) && strcmp(eCommand, "Volume", false) == 0)
                 {
@@ -470,7 +475,7 @@ public MRESReturn AcceptInput(int entity, Handle hReturn, Handle hParams)
             {
                 if(strcmp(eCommand, "PlaySound", false) == 0 || strcmp(eCommand, "ToggleSound", false) == 0)
                     g_smSndVolume.SetValue(soundFile, 10.0, true);
-                else if(StrEqual(eCommand, "Volume", false))
+                else if(strcmp(eCommand, "Volume", false) == 0)
                     g_smSndVolume.SetValue(soundFile, fParam, true);
             }
         }
@@ -519,27 +524,37 @@ public MRESReturn AcceptInput(int entity, Handle hReturn, Handle hParams)
 
 static float GetSoundLengthFloat(const char[] file)
 {
+    float result = 0.0;
+
+    if(g_smSndLength.GetValue(file, result))
+        return result;
+
     char path[256];
-    
+
     // in sound folder
     if(file[0] == '*' || file[0] == '#' || file[0] == '~')
         FormatEx(path, 256, "sound/%s", file[1]);
     else
-        FormatEx(path, 256, "%s", file);
+        FormatEx(path, 256, "sound/%s", file);
 
     Handle sound = OpenSoundFile(path, true);
 
     if(sound == null)
+    {
+        LogMessage("Failed to open sound [%s] in [%s]", file, path);
         ReplaceString(path, 256, "sound/", "", false);
+    }
 
     sound = OpenSoundFile(path, true);
     if(sound == null)
     {
-        ChatAll("Failed to open sound [%s]", file);
-        return 0.0;
+        LogMessage("Failed to open sound [%s] in [%s]", file, path);
+        g_smSndLength.SetValue(file, result, true);
+        return result;
     }
 
-    float result = GetSoundLength(sound);
+    result = float(GetSoundLength(sound));
+    g_smSndLength.SetValue(file, result, true);
 
     delete sound;
 
@@ -606,7 +621,8 @@ public void OnEntitySpawned(int entity)
             if(IsValidEntity(i))
             {
                 GetEntPropString(i, Prop_Data, "m_iName", eName, 64);
-                if (StrEqual(seName, eName, false)) {
+                if(strcmp(seName, eName, false) == 0)
+                {
                     g_smSourceEnt.SetValue(seName, EntIndexToEntRef(i), true);
                     return;
                 }
@@ -659,7 +675,7 @@ static void SendSound(char[] name, int entity, bool common = false, float length
                 EmitSoundToClient(i, FakePrecacheSound(name, common), sourceEnt, SNDCHAN_USER_BASE, SNDLEVEL_NORMAL, SND_NOFLAGS, g_fBGMVol[i], SNDPITCH_NORMAL, -1, _, _, true);
     }
 
-    DataPack pack = new DataPack();
+    DataPack pack;
     CreateDataTimer(length, Timer_OnSoundEnd, pack, TIMER_FLAG_NO_MAPCHANGE);
     pack.WriteString(name);
     pack.WriteCell(g_iNumRound);

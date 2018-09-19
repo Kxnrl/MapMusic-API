@@ -1,5 +1,5 @@
 #if defined _soundlib_ext_included
-  #endinput
+    #endinput
 #endif
 #define _soundlib_ext_included
 
@@ -20,7 +20,7 @@ native Handle OpenSoundFile(const char[] path, bool valve=false);
  * @param hndl            Handle to the sound file.
  * @return                The song length in seconds
  */
-native float GetSoundLength(Handle soundfile);
+native int GetSoundLength(Handle soundfile);
 
 /**
  * Get the Bit rate of sound (kbps)
@@ -43,16 +43,16 @@ native int GetSoundSamplingRate(Handle soundfile);
  */
 public Extension __ext_symphonia = 
 {
-	name = "SoundLib",
-	file = "soundlib.ext",
+    name = "SoundLib",
+    file = "soundlib.ext",
 #if defined AUTOLOAD_EXTENSIONS
-	autoload = 1,
+    autoload = 1,
 #else
-	autoload = 0,
+    autoload = 0,
 #endif
 #if defined REQUIRE_EXTENSIONS
-	required = 1,
+    required = 1,
 #else
-	required = 0,
+    required = 0,
 #endif
 };
