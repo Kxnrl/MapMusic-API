@@ -20,7 +20,11 @@ public Plugin myinfo =
 #include <regex>
 #include <clientprefs>
 #include <smutils>      //https://github.com/kxnrl/sourcemod-utils
-#include <soundlib>     //https://github.com/kxnrl/sm-ext-soundlib
+
+#undef REQUIRE_EXTENSIONS
+#include <SoundLib>     //https://github.com/kxnrl/sm-ext-soundlib
+#include <soundlib2>
+#define REQUIRE_EXTENSIONS
 
 static StringMap g_smSourceEnt;
 static StringMap g_smCtChannel;
@@ -45,6 +49,7 @@ static Handle hAcceptInput;
 static Regex regPattern;
 static RegexError regError;
 
+static int g_pSoundLib = 0;
 
 public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max)
 {
@@ -54,6 +59,9 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
     CreateNative("MapMusic_SetVolume", Native_SetVolume);
     CreateNative("MapMusic_GetStatus", Native_GetStatus);
     CreateNative("MapMusic_SetStatus", Native_SetStatus);
+    
+    __ext_SoundLib_SetNTVOptional();
+    __ext_soundlib2_SetNTVOptional();
 
     return APLRes_Success;
 }
@@ -148,6 +156,28 @@ public void OnPluginStart()
     SMUtils_SetChatPrefix("[\x04MapMusic\x01]");
     SMUtils_SetChatSpaces("     ");
     SMUtils_SetChatConSnd(false);
+    
+    CheckLibrary();
+}
+
+static void CheckLibrary()
+{
+    if(LibraryExists("soundlib2"))
+        g_pSoundLib = 2;
+    else if(LibraryExists("soundlib"))
+        g_pSoundLib = 1;
+    else
+        SetFailState("This plugin require 'soundlib2.ext' or 'soundlib.ext' running.");
+}
+
+public void OnLibraryAdded(const char[] name)
+{
+    CheckLibrary();
+}
+
+public void OnLibraryRemoved(const char[] name)
+{
+    CheckLibrary();
 }
 
 public void OnMapStart()
@@ -532,31 +562,36 @@ static float GetSoundLengthFloat(const char[] file)
     char path[256];
 
     // in sound folder
-    if(file[0] == '*' || file[0] == '#' || file[0] == '~')
+    if(file[0] == '*' || file[0] == '#' || file[0] == '~' || file[0] == ')')
         FormatEx(path, 256, "sound/%s", file[1]);
     else
         FormatEx(path, 256, "sound/%s", file);
 
-    Handle sound = OpenSoundFile(path, true);
-
-    if(sound == null)
+    if(g_pSoundLib == 2)
     {
-        LogMessage("Failed to open sound [%s] in [%s]", file, path);
-        ReplaceString(path, 256, "sound/", "", false);
-    }
-
-    sound = OpenSoundFile(path, true);
-    if(sound == null)
-    {
-        LogMessage("Failed to open sound [%s] in [%s]", file, path);
+        Handle sound = OpenSoundFile(path, true);
+        if(sound == null)
+        {
+            LogMessage("Failed to open sound [%s] in [%s]", file, path);
+            g_smSndLength.SetValue(file, result, true);
+            return result;
+        }
+        result = GetSoundLengthInMilliseconds(sound) / 1000.0;
         g_smSndLength.SetValue(file, result, true);
-        return result;
+        delete sound;
     }
-
-    result = float(GetSoundLength(sound));
-    g_smSndLength.SetValue(file, result, true);
-
-    delete sound;
+    else if(g_pSoundLib == 1)
+    {
+        Sound sound = new Sound(path, true);
+        if(sound == null)
+        {
+            g_smSndLength.SetValue(file, result, true);
+            return result;
+        }
+        result = sound.GetLength();
+        g_smSndLength.SetValue(file, result, true);
+        delete sound;
+    }
 
     return result;
 }
